@@ -4,6 +4,8 @@
 
 The MSP430 reads the NXP MMA845xQ accelerometer over I²C at address `0x1C`. The active sensor runs at 50 Hz with a ±2 g range. DicePod samples at 25 Hz. Eight steady samples on the same face confirm the orientation. At startup the first stable face sets the baseline. Each later stable face different from the previous one increments the 32-bit counter. Motion, ambiguous tilt and returning to the previous face produce no notification.
 
+The corrected D1.3 build reads all three axes in one I²C burst at 40 kHz, below the limit for repeated starts in MSP430G2955 erratum USCI35. After a timeout, the firmware resets the controller. If the accelerometer holds SDA low, the firmware pulses SCL up to nine times, then generates STOP once SDA releases. [MSP430G2955 errata](https://www.ti.com/lit/pdf/SLAZ441) · [I²C bus specification](https://www.nxp.com/docs/en/user-guide/UM10204.pdf)
+
 The MSP430 sends a `0x84` UART frame for a pending face when a client is ready. The Bluetooth chip publishes the measurement on GATT characteristic **Running Speed and Cadence Measurement (`2A53`)**. The cadence byte represents the face and the 32-bit distance field holds the unscaled face-change counter in little-endian order. Speed and stride length are zero.
 
 1. Subscribe to `FFF1` for command replies and `2A53` for measurements. Identify D1.3 by sending the version command `AB 02 SEQ 01` to `FFF2`. The reply is `BA 09 SEQ 01 00 D1 03 04 02 29 55`.

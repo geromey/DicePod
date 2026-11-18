@@ -24,6 +24,7 @@
 .equ IFG1, 0x0002
 .equ IFG2, 0x0003
 .equ P3REN, 0x0010
+.equ P3IN, 0x0018
 .equ P3OUT, 0x0019
 .equ P3DIR, 0x001A
 .equ P3SEL, 0x001B
@@ -77,6 +78,9 @@
 .equ OTHER_AXIS_THRESHOLD, 28            ; Other axes ≤ 0.44 g.
 .equ STEADY_SAMPLES, 8                 ; Number of steady samples before publishing a face.
 .equ I2C_TIMEOUT, 2000          ; I2C timeout loop iterations, about 12 ms.
+.equ I2C_SDA, 0x02             ; P3.1
+.equ I2C_SCL, 0x04             ; P3.2
+.equ I2C_PINS, I2C_SDA+I2C_SCL
 .equ ACCEL_INT, 0x04            ; P1.2 is the accelerometer interrupt, as in stock 0x481e.
 .equ CMD_READY, 0x30
 .equ CMD_ACK, 0x31
@@ -188,10 +192,9 @@ crystal_ready:
     BIC.B #1, &UCA0CTL1
     BIS.B #1, &IE2              ; UCA0RXIE
 
-    BIC.B #0x06, &P3REN         ; Idle I2C bus (P3.1 and P3.2 high), as in f_5dbe.
-    BIC.B #0x06, &P3SEL
-    BIS.B #0x06, &P3OUT
-    BIS.B #0x06, &P3DIR
+    BIC.B #I2C_PINS, &P3REN      ; The board's pull-ups keep the released bus high.
+    BIC.B #I2C_PINS, &P3DIR
+    BIC.B #I2C_PINS, &P3OUT
     CALL #i2c_init
     MOV.B #1, &V_RECONFIGURE         ; Configure the accelerometer in the main loop.
 
@@ -788,14 +791,13 @@ mma_sleep_config:
     .even
 
 ; ---------------------------------------------------------------- I2C (USCI_B0)
-; Use the stock application's sequence (f_678e, f_667c, p_62f2, f_5d72,
-; f_6e2a) with timeouts. Return R12 = 0 on success or 1 on error.
+; Return R12 = 0 on success or 1 on error.
 i2c_init:
-    BIS.B #0x06, &P3SEL
     MOV.B #1, &UCB0CTL1         ; UCSWRST
+    BIS.B #I2C_PINS, &P3SEL
     MOV.B #0x0F, &UCB0CTL0      ; Synchronous I2C controller mode.
     BIS.B #0x80, &UCB0CTL1      ; SMCLK
-    MOV.B #3, &UCB0BR0          ; 333 kHz
+    MOV.B #25, &UCB0BR0         ; 40 kHz: MSP430G2955 erratum USCI35 requires <50 kHz for repeated START.
     CLR.B &UCB0BR1
     MOV #0x1C, &UCB0I2CSA
     BIC.B #1, &UCB0CTL1
@@ -834,7 +836,6 @@ i2c_start:                      ; R12 holds the register. Send START and write t
     CALL #wait_clear
     TST R12
     JNZ i2c_start_error
-    CALL #i2c_init
     BIS.B #0x10, &UCB0CTL1      ; UCTR
     BIS.B #0x02, &UCB0CTL1      ; UCTXSTT
     MOV #IFG2, R11
@@ -849,7 +850,8 @@ i2c_start:                      ; R12 holds the register. Send START and write t
     JNZ i2c_start_done
     MOV #UCB0CTL1, R11
     MOV #0x02, R14              ; UCTXSTT has cleared.
-    JMP wait_clear
+    CALL #wait_clear
+    JMP i2c_check_nack
 i2c_start_error:
     INCD SP
 i2c_start_done:
@@ -861,7 +863,6 @@ i2c_write:                     ; Register in R12 and value in R13.
     POP R13
     TST R12
     JNZ i2c_error
-    BIS.B #0x10, &UCB0CTL1
     MOV #IFG2, R11
     MOV #0x08, R14
     CALL #wait_set
@@ -881,49 +882,95 @@ i2c_read:                       ; Register in R12, destination in R13, byte coun
     CALL #i2c_start
     TST R12
     JNZ i2c_read_error
-    BIC.B #0x10, &UCB0CTL1      ; Receive mode.
+    BIC.B #0x10, &UCB0CTL1      ; Receive mode, with one repeated START for the burst.
+    BIS.B #0x02, &UCB0CTL1
+    MOV #UCB0CTL1, R11
+    MOV #0x02, R14
+    CALL #wait_clear
+    CALL #i2c_check_nack
+    TST R12
+    JNZ i2c_read_error
 i2c_read_loop:
-    BIS.B #0x02, &UCB0CTL1      ; Issue (re)START for every byte, as in f_5d72.
+    CMP #1, R10
+    JNE i2c_receive_byte
+    BIS.B #0x04, &UCB0CTL1      ; Request NACK and STOP before the last byte arrives.
+i2c_receive_byte:
     MOV #IFG2, R11
     MOV #0x04, R14              ; UCB0RXIFG
     CALL #wait_set
     TST R12
     JNZ i2c_read_error
     MOV.B &UCB0RXBUF, 0(R9)
-    CALL #wait_clear
-    TST R12
-    JNZ i2c_read_error
     INC R9
     DEC R10
     JNZ i2c_read_loop
     POP R9
     POP R10
-    JMP i2c_stop
+    JMP i2c_wait_stop
 i2c_read_error:
     POP R9
     POP R10
     JMP i2c_error
 
 i2c_stop:
-    MOV #I2C_TIMEOUT, R15
-stop_loop:
     BIS.B #0x04, &UCB0CTL1      ; UCTXSTP
-    BIT.B #0x10, &UCB0STAT
-    JZ stop_done
-    DEC R15
-    JNZ stop_loop
-    BIC.B #0x04, &UCB0CTL1
-    JMP i2c_error
-stop_done:
-    BIC.B #0x04, &UCB0CTL1
-    CLR R12
+i2c_wait_stop:
+    MOV #UCB0CTL1, R11
+    MOV #0x04, R14
+    CALL #wait_clear
+    CALL #i2c_check_nack
+    TST R12
+    JNZ i2c_error
+    RET
+
+i2c_check_nack:
+    BIT.B #0x08, &UCB0STAT      ; UCNACKIFG
+    JZ i2c_no_nack
+    MOV #1, R12
+i2c_no_nack:
     RET
 
 i2c_error:
     INC.B &V_ERR_I2C
-    CALL #i2c_init
+    CALL #i2c_recover
     MOV #1, R12
     RET
+
+; Release the lines before taking over as GPIO. Drive only low and let the
+; pull-ups bring the lines high whenever the device releases them.
+i2c_recover:
+    BIS.B #1, &UCB0CTL1
+    BIC.B #I2C_PINS, &P3DIR
+    BIC.B #I2C_PINS, &P3SEL
+    MOV #P3IN, R11
+    MOV #I2C_SCL, R14
+    CALL #wait_set
+    TST R12
+    JNZ i2c_recover_done
+    BIT.B #I2C_SDA, &P3IN
+    JNZ i2c_recover_done
+    MOV #9, R13
+i2c_recover_clock:
+    BIS.B #I2C_SCL, &P3DIR
+    NOP
+    NOP
+    BIC.B #I2C_SCL, &P3DIR
+    CALL #wait_set
+    TST R12
+    JNZ i2c_recover_done
+    BIT.B #I2C_SDA, &P3IN
+    JNZ i2c_recover_stop
+    DEC R13
+    JNZ i2c_recover_clock
+    JMP i2c_recover_done
+i2c_recover_stop:
+    BIS.B #I2C_SCL, &P3DIR      ; Set up STOP with SDA low, then release SCL before SDA.
+    BIS.B #I2C_SDA, &P3DIR
+    BIC.B #I2C_SCL, &P3DIR
+    CALL #wait_set
+    BIC.B #I2C_SDA, &P3DIR
+i2c_recover_done:
+    JMP i2c_init
 
 ; Data
 ; Index by upward axis (+X, -X, +Y, -Y, +Z, -Z). Opposite faces sum to seven.

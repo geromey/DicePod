@@ -167,6 +167,19 @@ def main():
     check(not m and r and p.watchdog_resets == 0,
           f"no face, version reply {'received' if r else 'missing'}, no reset")
 
+    print("7b. Recover from an accelerometer holding SDA low")
+    p = dice_pod(image)
+    p.run(2 * MCLK)
+    command(p, READY)
+    p.tx.clear()
+    p.i2c.sda_hold_clocks = 9
+    p.mma.orientation = lambda t: (1.0, 0.0, 0.0, 0.01)
+    p.run(2 * MCLK)
+    check(p.mem[symbols["V_ERR_I2C"]] == 1 and p.i2c.sda_hold_clocks == 0,
+          "nine GPIO clock pulses release SDA after an I2C timeout")
+    check(measurements(p.tx) == [(2, 1)] and p.watchdog_resets == 0,
+          "report the new face after bus recovery without restarting the pod")
+
     print("8. Two minutes without movement requests disconnect and puts the device to sleep")
     src = open(os.path.join(HERE, "dice.s"), encoding="utf-8").read()
     p = dice_pod(image)

@@ -86,14 +86,26 @@ class I2CController:
         self.ctl1 = 0x01
         self.busy = False
         self.txifg = False
-        self.rxifg = False
+        self._rxifg = False
+        self._next_rx_poll = False
         self.rxbuf = 0
         self.transmitting = False
+        self.sda_hold_clocks = 0
+
+    @property
+    def rxifg(self):
+        if not self._rxifg and self.busy and not self.transmitting:
+            if self._next_rx_poll:
+                self._next_rx_poll = False
+            else:
+                self.rxbuf = self.device.read()
+                self._rxifg = True
+        return self._rxifg
 
     def write_ctl1(self, v):
         self.ctl1 = v
         if v & 0x01:                          # UCSWRST
-            self.busy = self.txifg = self.rxifg = self.transmitting = False
+            self.busy = self.txifg = self._rxifg = self.transmitting = False
             return
         if v & 0x02:                          # UCTXSTT sends START and the address.
             self.busy = True
@@ -103,11 +115,11 @@ class I2CController:
                 self.device.start_transaction(True)
                 self.txifg = True
             else:                             # Receive mode. One byte arrived.
-                self.transmitting = False
+                self.transmitting = self.txifg = False
                 self.device.start_transaction(False)
                 self.rxbuf = self.device.read()
-                self.rxifg = True
-        if v & 0x04:                          # UCTXSTP
+                self._rxifg = True
+        if v & 0x04 and self.transmitting:    # Receiver STOP completes with its final byte.
             self.busy = self.transmitting = self.txifg = False
             self.ctl1 &= ~0x04
 
@@ -117,7 +129,11 @@ class I2CController:
             self.txifg = True
 
     def read_rx(self):
-        self.rxifg = False
+        self._rxifg = False
+        self._next_rx_poll = True
+        if self.ctl1 & 0x04:
+            self.busy = False
+            self.ctl1 &= ~0x04
         return self.rxbuf
 
 
@@ -200,7 +216,11 @@ class Pod:
         if a == 0x69:
             return self.i2c.ctl1
         if a == 0x6D:                                     # UCB0STAT : UCBBUSY
-            return 0x10 if self.i2c.busy else 0
+            return 0x10 if self.i2c.busy or self.i2c.sda_hold_clocks else 0
+        if a == 0x18:                                     # Released P3 I2C pins have external pull-ups.
+            port_output = self.per[0x1A] & ~self.per[0x1B]
+            pullups = 0x04 if self.i2c.sda_hold_clocks else 0x06
+            return (pullups & ~port_output) | (self.per[0x19] & port_output)
         if a == 0x6E:
             return self.i2c.read_rx()
         if a == 0x66:                                     # UCA0RXBUF
@@ -306,6 +326,9 @@ class Pod:
         if a == 0x6F:
             self.i2c.write_tx(v & 0xFF)
             return
+        if a == 0x1A and not (self.per[0x1B] | self.per[0x19] | v) & 0x04:
+            if self.per[0x1A] & 0x04 and self.i2c.sda_hold_clocks:
+                self.i2c.sda_hold_clocks -= 1              # SCL rises when GPIO releases it.
         if a == 0x21 and (v ^ self.per[0x21]) & 0x08 and self.flow_control:
             # Once P1.3 toggles, the Bluetooth chip sends the next byte immediately.
             if self.rx_fallback and self.rx:

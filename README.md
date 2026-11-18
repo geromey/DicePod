@@ -2,7 +2,7 @@
 
 DicePod turns a **Zwift RunPod** into a six-sided Bluetooth remote. Choose an action by resting the die on the corresponding face. Install the firmware over Bluetooth Low Energy from Linux without opening the sensor.
 
-Revision **D1.3** was installed and verified by readback on a Zwift RunPod with an MSP430G2955 (chip ID **29 55**). The Linux reader disconnected after two minutes without movement. The RunPod remained visible in Bluetooth LE scans during standby. Wake on motion and delivery after reconnection have been tested in the emulator. A hardware test of that full sequence remains pending.
+The current **D1.3** build includes an I²C recovery fix and retains the Bluetooth version expected by Home Assistant. It was installed and verified by readback on a Zwift RunPod with an MSP430G2955 (chip ID **29 55**). After installation, Home Assistant recorded several face changes. Recovery from a forced bus fault and delivery after waking were verified in the emulator.
 
 ## 1. Set up Linux and find your RunPod
 
