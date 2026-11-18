@@ -1,5 +1,7 @@
 # RunPod firmware and Bluetooth
 
+DicePod is written in MSP430 assembly. Its design draws on reverse engineering of the original Zwift RunPod firmware and bootloader. This analysis informed the hardware initialization and the communication between the MSP430 and the Bluetooth chip.
+
 ## From the sensor to the notification
 
 The MSP430 reads the NXP MMA845xQ accelerometer over I²C at address `0x1C`. The active sensor runs at 50 Hz with a ±2 g range. DicePod samples at 25 Hz. Eight steady samples on the same face confirm the orientation. At startup the first stable face sets the baseline. Each later stable face different from the previous one increments the 32-bit counter. Motion, ambiguous tilt and returning to the previous face produce no notification.
