@@ -68,13 +68,24 @@ python3 runpod_read.py "$POD" 0 --dice
 
 Move the die before connecting if it has been idle. The first stable face at power-up sets the starting position. Rest the die on a different face to display a line such as `FACE 6, changes: 5`. The counter records stable face changes since startup. After two minutes without movement, the die enters standby and the reader disconnects. Press Ctrl+C to stop.
 
-A Home Assistant integration can subscribe, receive and acknowledge face changes using the [Bluetooth protocol](technical.md#from-the-sensor-to-the-notification).
+To use face changes in an automation, [set up DicePod in Home Assistant](#5-add-dicepod-to-home-assistant).
 
 To make a physical die, secure the RunPod inside a cube with access to the battery. The default mapping is **+Z = 1**, **−Z = 6**, **+X = 2**, **−X = 5**, **+Y = 3**, and **−Y = 4**. Rest the cube on each side and run the following command to identify the axis pointing up. Use that mapping to label the faces, or edit `TABLE_FACES` if the cube is already numbered.
 
 ```bash
 python3 -I runpod_cmd.py "$POD" --axes
 ```
+
+## 5. Add DicePod to Home Assistant
+
+Use firmware D1.3 and a Home Assistant instance with the Bluetooth integration enabled. DicePod needs a local BLE adapter or a Bluetooth proxy with active connections enabled. The integration was tested on Home Assistant Core 2026.11.2. [Home Assistant Bluetooth setup](https://www.home-assistant.io/integrations/bluetooth/)
+
+1. Copy the entire [`custom_components/dicepod`](custom_components/dicepod) folder from this repository into `custom_components` in your Home Assistant configuration directory. Create `custom_components` if needed. On Home Assistant OS, the manifest should be at `/config/custom_components/dicepod/manifest.json`.
+2. Restart Home Assistant. Go to **Settings → Devices & services → Add integration** and select **DicePod**.
+3. Enter the Bluetooth address you found in [step 1](#1-set-up-linux-and-find-your-runpod), in the form `AA:BB:CC:DD:EE:FF`. Close the Linux reader or any app connected to the pod, then move the die and set it down on a different face.
+4. Open the DicePod device in Home Assistant and check its **Face** sensor. The default entity ID for the first die is `sensor.dicepod_face`. To run an automation when a particular face lands, use a state trigger for this sensor and set the target state to the face number from 1 to 6.
+
+The sensor keeps its last value while the die sleeps. Home Assistant returns to Bluetooth discovery when the die signals standby, the connection drops, or two minutes pass without a notification. It tries to reconnect when it receives a new connectable advertisement. To check the wake-up cycle, leave the die still for more than two minutes, then turn it to a different face and check that the sensor updates. [DicePod Bluetooth protocol](technical.md#from-the-sensor-to-the-notification)
 
 ## Restore the stock firmware
 

@@ -1,0 +1,25 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Ajouter un DicePod",
+        "data": {
+          "address": "Adresse Bluetooth"
+        }
+      }
+    },
+    "abort": {
+      "already_configured": "Ce DicePod est déjà configuré."
+    },
+    "error": {
+      "invalid_address": "Saisissez une adresse Bluetooth comme 00:11:22:33:44:55."
+    }
+  },
+  "entity": {
+    "sensor": {
+      "face": {
+        "name": "Face"
+      }
+    }
+  }
+}
