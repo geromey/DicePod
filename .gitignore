@@ -1,0 +1,10 @@
+__pycache__/
+*.py[cod]
+/logs/
+/backups/
+*.bin
+*.log
+*.lst
+*.mp
+!/firmware/dice_v2.mp
+!/firmware/dice_v3.mp
